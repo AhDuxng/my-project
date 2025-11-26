@@ -1,5 +1,4 @@
-import { useState } from 'react';
-// import './App.css'; // Đã comment lại dòng này để tránh lỗi nếu file không tồn tại
+import { useState, useEffect } from 'react';
 
 function App() {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -8,20 +7,24 @@ function App() {
   const [error, setError] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
 
-  // Xử lý khi người dùng chọn file
+  // Dọn dẹp URL ảnh preview khi component unmount hoặc file thay đổi
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
   const handleFileChange = (event) => {
     const file = event.target.files[0];
     if (file) {
       setSelectedFile(file);
       setError(null);
       setJsonData(null);
-      // Tạo url ảnh ảo để xem trước
       const objectUrl = URL.createObjectURL(file);
       setPreviewUrl(objectUrl);
     }
   };
 
-  // Hàm gửi ảnh sang Python Backend
   const uploadImageToBackend = async () => {
     if (!selectedFile) {
       setError("Vui lòng chọn một file ảnh trước!");
@@ -33,49 +36,60 @@ function App() {
     setJsonData(null);
 
     try {
-      // 1. Tạo FormData (giống như form HTML truyền thống)
       const formData = new FormData();
-      // 'file' ở đây phải trùng tên với tham số trong server.py: file: UploadFile
       formData.append("file", selectedFile); 
 
-      // 2. Gọi API sang Python (Port 8000)
+      // Gọi API sang Python Backend
       const response = await fetch("http://localhost:8000/analyze-invoice", {
         method: "POST",
         body: formData,
-        // Lưu ý: Khi gửi FormData, KHÔNG cần set Content-Type header thủ công
       });
 
       if (!response.ok) {
-        // Nếu server trả về lỗi (4xx, 5xx)
         const errorData = await response.json();
         throw new Error(errorData.detail || "Lỗi kết nối Server");
       }
 
-      // 3. Nhận kết quả JSON
       const result = await response.json();
       setJsonData(result);
 
     } catch (err) {
       console.error("Lỗi:", err);
-      setError(err.message || "Không thể kết nối tới Backend Python.");
+      setError(err.message || "Không thể kết nối tới Backend Python. Hãy kiểm tra server đã chạy chưa.");
     } finally {
       setLoading(false);
     }
   };
 
+  const downLoadJson = () => {
+    if (!jsonData) return;
+
+    const jsonString = JSON.stringify (jsonData, null, 2);
+    const blob = new Blob([jsonString], {type: "application/json"}); //đóng gói
+    const url =  URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = selectedFile ? `ket_qua_${selectedFile.name}.json` : "data.json";
+    document.body.appendChild(link); // đảm bảo chạy trên mọi trình duyệt
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
   return (
-    <div className="container" style={{ maxWidth: "800px", margin: "0 auto", padding: "20px", fontFamily: "Arial, sans-serif" }}>
-      <h1 style={{ textAlign: "center", color: "#333" }}>🧾 Phân tích Hóa đơn AI</h1>
-      <p style={{ textAlign: "center", color: "#666" }}>React (Vite) + Python (FastAPI) + Gemini</p>
+    <div style={{ maxWidth: "800px", margin: "0 auto", padding: "20px", fontFamily: "Arial, sans-serif", color: "#333", boxSizing: "border-box", width: "100%"}}>
+      <h1 style={{ textAlign: "center", color: "#2c3e50" }}>Chuyển dữ liệu ảnh hóa đơn sang Json</h1>
 
       {/* Khu vực Upload */}
       <div style={{ 
-        border: "2px dashed #ccc", 
+        border: "2px dashed #3498db", 
         borderRadius: "10px", 
-        padding: "30px", 
+        padding: "40px", 
         textAlign: "center",
-        backgroundColor: "#f9f9f9",
-        marginBottom: "20px"
+        backgroundColor: "#ecf0f1",
+        marginBottom: "20px",
+        transition: "all 0.3s ease"
       }}>
         <input 
           type="file" 
@@ -85,24 +99,26 @@ function App() {
           id="file-upload"
         />
         <label htmlFor="file-upload" style={{
-          backgroundColor: "#007bff",
+          backgroundColor: "#3498db",
           color: "white",
-          padding: "10px 20px",
-          borderRadius: "5px",
+          padding: "12px 24px",
+          borderRadius: "6px",
           cursor: "pointer",
-          fontSize: "16px"
+          fontSize: "16px",
+          fontWeight: "bold",
+          display: "inline-block"
         }}>
-          📁 Chọn ảnh hóa đơn
+          Chọn ảnh hóa đơn
         </label>
         
-        {selectedFile && <p style={{ marginTop: "10px" }}>Đã chọn: <strong>{selectedFile.name}</strong></p>}
+        {selectedFile && <p style={{ marginTop: "15px", color: "#2980b9" }}>Đã chọn: <strong>{selectedFile.name}</strong></p>}
 
         {previewUrl && (
           <div style={{ marginTop: "20px" }}>
             <img 
               src={previewUrl} 
               alt="Preview" 
-              style={{ maxWidth: "100%", maxHeight: "300px", borderRadius: "8px", boxShadow: "0 4px 8px rgba(0,0,0,0.1)" }} 
+              style={{ maxWidth: "100%", maxHeight: "400px", borderRadius: "8px", boxShadow: "0 4px 12px rgba(0,0,0,0.15)" }} 
             />
           </div>
         )}
@@ -114,47 +130,48 @@ function App() {
           onClick={uploadImageToBackend} 
           disabled={loading || !selectedFile}
           style={{
-            padding: "12px 30px",
+            padding: "14px 40px",
             fontSize: "18px",
-            backgroundColor: loading ? "#ccc" : "#28a745",
+            backgroundColor: loading ? "#95a5a6" : "#27ae60",
             color: "white",
             border: "none",
-            borderRadius: "5px",
+            marginTop: "10px",
+            borderRadius: "6px",
             cursor: loading ? "not-allowed" : "pointer",
-            transition: "background 0.3s"
+            fontWeight: "bold",
+            boxShadow: "0 2px 5px rgba(0,0,0,0.2)"
           }}
         >
-          {loading ? "⏳ Đang xử lý..." : "🚀 Phân tích ngay"}
+          {loading ? " Đang xử lý..." : " Phân tích ngay"}
         </button>
       </div>
 
       {/* Thông báo lỗi */}
       {error && (
         <div style={{ 
-          backgroundColor: "#ffebee", 
-          color: "#c62828", 
+          backgroundColor: "#fee2e2", 
+          color: "#c0392b", 
           padding: "15px", 
-          borderRadius: "5px", 
+          borderRadius: "6px", 
           marginBottom: "20px",
-          border: "1px solid #ef9a9a"
+          border: "1px solid #e74c3c"
         }}>
           <strong>❌ Lỗi:</strong> {error}
-          <br/>
-          <small>Gợi ý: Hãy chắc chắn bạn đã chạy lệnh "npm run start" để bật cả Python server.</small>
         </div>
       )}
 
       {/* Kết quả JSON */}
       {jsonData && (
         <div style={{ animation: "fadeIn 0.5s" }}>
-          <h3>✅ Kết quả phân tích:</h3>
+          <h3 style={{color: "#27ae60"}}>Kết quả phân tích:</h3>
           <div style={{ 
-            backgroundColor: "#2d2d2d", 
-            color: "#f8f8f2", 
+            backgroundColor: "#2c3e50", 
+            color: "#ecf0f1", 
             padding: "20px", 
             borderRadius: "8px", 
             overflowX: "auto",
-            textAlign: "left"
+            fontSize: "14px",
+            lineHeight: "1.5"
           }}>
             <pre style={{ margin: 0, fontFamily: "Consolas, monospace" }}>
               {JSON.stringify(jsonData, null, 2)}
@@ -162,6 +179,25 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* Nút Tải JSON */}
+      <div style={{ textAlign: "center", marginTop: "20px" }}>
+        <button onClick={downLoadJson} 
+        style={{
+          marginTop: "10px", 
+          backgroundColor: "#2980b9", 
+          color: "white", 
+          padding: "10px 20px", 
+          border: "none", 
+          cursor: "pointer", 
+          borderRadius: "6px",
+          textAlign: "center",
+          fontWeight: "bold"
+          }}
+          >
+          Tải kết quả JSON
+        </button>
+      </div>
     </div>
   );
 }
