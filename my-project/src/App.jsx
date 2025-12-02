@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import ReactJson from 'react-json-view';
 
 function App() {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -7,7 +8,7 @@ function App() {
   const [error, setError] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
 
-  // Dọn dẹp URL ảnh preview khi component unmount hoặc file thay đổi
+  // Dọn dẹp URL 
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -162,23 +163,27 @@ function App() {
 
       {/* Kết quả JSON */}
       {jsonData && (
-        <div style={{ animation: "fadeIn 0.5s" }}>
-          <h3 style={{color: "#27ae60"}}>Kết quả phân tích:</h3>
-          <div style={{ 
-            backgroundColor: "#2c3e50", 
-            color: "#ecf0f1", 
-            padding: "20px", 
-            borderRadius: "8px", 
-            overflowX: "auto",
-            fontSize: "14px",
-            lineHeight: "1.5"
-          }}>
-            <pre style={{ margin: 0, fontFamily: "Consolas, monospace" }}>
-              {JSON.stringify(jsonData, null, 2)}
-            </pre>
-          </div>
+        <div style={{ animation: "fadeIn 0.5s", marginTop: "30px" }}>
+        <h3 style={{color: "#27ae60", marginBottom: "15px"}}>Kết quả phân tích:</h3>
+
+        {/* Khung hiển thị JSON */}
+        <div style={{ 
+          borderRadius: "8px", 
+          overflow: "hidden",
+          boxShadow: "0 4px 6px rgba(0,0,0,0.1)",
+          border: "1px solid #e0e0e0"
+        }}>
+          <ReactJson 
+            src={jsonData} 
+            theme="monokai"      
+            collapsed={false}    // Mặc định mở hết các dòng
+            displayDataTypes={false} // Ẩn kiểu dữ liệu 
+            enableClipboard={true} // Cho phép copy từng dòng
+            style={{ padding: "20px", fontSize: "14px" }}
+          />
         </div>
-      )}
+      </div>
+    )}
 
       {/* Nút Tải JSON */}
       <div style={{ textAlign: "center", marginTop: "20px" }}>

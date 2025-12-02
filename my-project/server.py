@@ -1,127 +1,135 @@
 import os
-import json
 import uvicorn
+import requests
+import re
+import json
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import google.generativeai as genai
 from dotenv import load_dotenv
 
-# 1. Load biến môi trường từ file .env
 load_dotenv()
-
 app = FastAPI()
 
-# 2. Cấu hình CORS để Frontend (React) có thể gọi được Backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Cho phép mọi nguồn (trong dev). Product nên để domain cụ thể.
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 3. Cấu hình Google Gemini API
-API_KEY = os.getenv("GEMINI_API_KEY")
+API_KEY = os.getenv("OCR_API_KEY", "helloworld")
 
-if not API_KEY:
-    print("⚠️  CẢNH BÁO: Chưa tìm thấy GEMINI_API_KEY trong file .env")
-else:
-    genai.configure(api_key=API_KEY)
+def parse_money(text):
+    """Lọc số từ chuỗi tiền tệ (VD: 100,000 -> 100000)"""
+    # Chỉ giữ lại số và dấu chấm
+    clean_text = re.sub(r'[^\d]', '', text)
+    try:
+        return int(clean_text)
+    except:
+        return 0
 
-# Sử dụng model AI
-model = genai.GenerativeModel('gemini-2.0-flash')
+def smart_invoice_parser(raw_text):
+    """Phân tích text thô thành JSON"""
+    lines = [line.strip() for line in raw_text.split('\r\n') if line.strip()]
+    
+    parsed_data = {
+        "merchant_name": "Unknown",
+        "date": "",
+        "items": [],
+        "total_amount": 0,
+        "raw_text": raw_text
+    }
+
+    if not lines:
+        return parsed_data
+
+    parsed_data["merchant_name"] = lines[0]
+
+    # Tìm ngày tháng
+    for line in lines:
+        if re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{4}', line):
+            parsed_data["date"] = re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{4}', line).group(0)
+            break
+
+    max_amount = 0
+    
+    for line in lines:
+        # Regex tìm dòng có giá tiền ở cuối
+        match = re.search(r'(.+?)[\s\t\.\:]+([\d,.]+)$', line)
+        if match:
+            item_name = match.group(1).strip()
+            price_str = match.group(2)
+            
+            # Bỏ qua các dòng quá ngắn
+            if len(item_name) < 2 or set(item_name).issubset(set(' -:.,')):
+                continue
+
+            price = parse_money(price_str)
+            
+            if price > 0:
+                parsed_data["items"].append({
+                    "name": item_name,
+                    "price": price
+                })
+                # Giả định số lớn nhất là tổng tiền
+                if price > max_amount:
+                    max_amount = price
+
+    parsed_data["total_amount"] = max_amount
+    return parsed_data
 
 @app.post("/analyze-invoice")
 async def analyze_invoice(file: UploadFile = File(...)):
-    # Kiểm tra định dạng file
     if not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="File tải lên phải là hình ảnh.")
+        raise HTTPException(status_code=400, detail="File phải là hình ảnh.")
 
     try:
-        # Đọc dữ liệu ảnh
         content = await file.read()
-
-        # --- PROMPT AI
-        prompt = """
-        Hãy đóng vai một công cụ OCR và xử lý dữ liệu hóa đơn chuyên nghiệp. Nhiệm vụ của bạn là trích xuất TOÀN BỘ thông tin văn bản nhìn thấy trong hình ảnh này.
-
-        Yêu cầu định dạng đầu ra:
-        1. Trả về kết quả dưới dạng JSON thuần túy hợp lệ (raw JSON).
-        2. KHÔNG sử dụng markdown code block (không dùng ```json).
-        3. Tuyệt đối KHÔNG bỏ sót bất kỳ thông tin nào xuất hiện trên hóa đơn (ví dụ: Địa chỉ, Số điện thoại, Mã số thuế, Tên thu ngân, Giờ in, Tiền thừa, Tiền khách đưa...).
-        4. Nếu một trường thông tin có trên hóa đơn nhưng không nằm trong danh sách key tiêu chuẩn, hãy đưa nó vào object "other_info".
-
-        Cấu trúc JSON mong muốn:
-        {
-            "merchant_name": "Tên cửa hàng/người bán (viết đúng theo ảnh)",
-            "merchant_address": "Địa chỉ chi tiết của cửa hàng",
-            "merchant_phone": "Số điện thoại cửa hàng",
-            "tax_id": "Mã số thuế (MST)",
-            "invoice_number": "Số hóa đơn/Mã vận đơn",
-            "date": "Ngày mua hàng (giữ nguyên định dạng gốc trên ảnh)",
-            "time": "Giờ mua hàng (nếu có)",
-            "items": [
-                {
-                    "name": "Tên sản phẩm đầy đủ",
-                    "quantity": "Số lượng (giữ nguyên đơn vị tính nếu có)",
-                    "unit_price": "Đơn giá",
-                    "total_price": "Thành tiền",
-                    "discount": "Giảm giá trên sản phẩm (nếu có)"
-                }
-            ],
-            "financials": {
-                "subtotal": "Tổng tiền hàng (trước thuế/giảm giá)",
-                "tax_amount": "Tổng tiền thuế",
-                "discount_amount": "Tổng giảm giá hóa đơn",
-                "service_charge": "Phí dịch vụ/Ship",
-                "total_amount": "Tổng thanh toán cuối cùng (số to nhất)",
-                "currency": "Đơn vị tiền tệ (VND, USD...)"
-            },
-            "payment_info": {
-                "method": "Phương thức thanh toán (Tiền mặt/Thẻ/Chuyển khoản)",
-                "cash_given": "Tiền khách đưa",
-                "change_returned": "Tiền thừa trả khách"
-            },
-            "other_info": {
-                "cashier_name": "Tên thu ngân",
-                "wifi_password": "Mật khẩu wifi (nếu có)",
-                "footer_message": "Lời cảm ơn cuối hóa đơn",
-                "...": "Bất kỳ thông tin nào khác thấy trên ảnh gán vào key tương ứng"
-            }
+        
+        url = "https://api.ocr.space/parse/image"
+        
+        payload = {
+            'apikey': API_KEY,
+            'language': 'eng',   
+            'isOverlayRequired': True,
+            'scale': True,
+            'OCREngine': 2      
         }
-        """
-
-        # Gửi yêu cầu sang Google Gemini
-        response = model.generate_content([
-            prompt,
-            {"mime_type": file.content_type, "data": content}
-        ])
-
-        # Xử lý kết quả trả về (Làm sạch chuỗi JSON)
-        response_text = response.text.strip()
         
-        # Loại bỏ markdown code block nếu Gemini lỡ thêm vào
-        if response_text.startswith("```json"):
-            response_text = response_text[7:]
-        elif response_text.startswith("```"):
-            response_text = response_text[3:]
-            
-        if response_text.endswith("```"):
-            response_text = response_text[:-3]
-
-        # Parse string thành JSON object
-        invoice_data = json.loads(response_text)
+        files = {'file': (file.filename, content, file.content_type)}
         
-        return invoice_data
+        print(f"📡 Đang gửi file sang OCR.space (Engine 2 - English)...")
+        # Timeout 30s để tránh treo
+        response = requests.post(url, files=files, data=payload, timeout=30)
+        
+        if response.status_code != 200:
+            raise HTTPException(status_code=502, detail="Lỗi kết nối OCR.space")
 
-    except json.JSONDecodeError:
-        # Trường hợp AI trả về text không phải JSON chuẩn
-        print(f"Lỗi JSON: {response.text}")
-        raise HTTPException(status_code=500, detail="AI trả về dữ liệu không đúng định dạng JSON.")
+        result = response.json()
+        
+        # Debug lỗi
+        if result.get("IsErroredOnProcessing") == True:
+            err = result.get("ErrorMessage")
+            print(f"❌ Lỗi API: {err}")
+            raise HTTPException(status_code=400, detail=f"OCR Error: {err}")
+
+        parsed_results = result.get("ParsedResults")
+        if not parsed_results:
+             return {"message": "Không đọc được chữ nào.", "data": {}}
+
+        full_text = parsed_results[0].get("ParsedText", "")
+        print("--- KẾT QUẢ TEXT ---")
+        print(full_text)
+        
+        # Chuyển text thành JSON
+        json_response = smart_invoice_parser(full_text)
+        return json_response
+
     except Exception as e:
-        print(f"Lỗi Server: {e}")
-        raise HTTPException(status_code=500, detail=f"Lỗi xử lý: {str(e)}")
+        print(f"❌ Exception: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    print("🚀 Server đang chạy tại http://localhost:8000")
+    print("🚀 Server đang chạy...")
     uvicorn.run(app, host="0.0.0.0", port=8000)
