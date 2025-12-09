@@ -1,0 +1,13 @@
+[
+  { "id": 1, "name": "Máy móc thiết bị" },
+  { "id": 2, "name": "Nguyên vật liệu" },
+  { "id": 3, "name": "Hàng hóa tiêu dùng" },
+  { "id": 4, "name": "Dịch vụ" },
+  { "id": 5, "name": "Xăng dầu & Nhiên liệu" },
+  { "id": 6, "name": "Văn phòng phẩm" },
+  { "id": 7, "name": "Điện tử & Công nghệ" },
+  { "id": 8, "name": "Vật liệu xây dựng" },
+  { "id": 9, "name": "Nội thất & Trang trí" },
+  { "id": 10, "name": "Quần áo & Thời trang" }
+]
+
